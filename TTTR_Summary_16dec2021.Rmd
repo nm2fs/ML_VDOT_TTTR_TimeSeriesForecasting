@@ -1,0 +1,224 @@
+---
+title: "TTTR_VDOT"
+author: "Negin Moghadasi"
+date: "9/18/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, message=FALSE, include=FALSE, echo=FALSE}  
+  #### Loading packages
+library(tidyverse)
+library(dplyr)
+library(RPostgreSQL)
+library(tibble)
+library(magick)
+library(tinytex)
+library(tsibble)
+library(lubridate)
+library(ggfortify)
+library(readr)
+library(here)
+library(mosaic)
+library(magrittr)
+library(tseries)
+library(fable)
+library(rio)
+library(tsibbledata)
+library(forecast)
+library(bibtex)
+library(rticles)
+library(xlsx)
+library(writexl)
+remotes::install_github('yihui/tinytex')
+options(tinytex.verbose = TRUE)    
+```
+
+
+```{r, message=FALSE, results='hide',warning=FALSE, echo=FALSE}
+path <- here::here("data", "TTTR summary.xlsx")
+TTTR_Summary <- read.xlsx("/Volumes/08.18.2020/UVA/VDOT/TTTR Draft and R model /TTTR summary.xlsx", sheetIndex = 1)
+
+TTTR_Summary
+```
+
+
+```{r}
+names(TTTR_Summary)[names(TTTR_Summary) == 'tttr....'] <- "TTTR_Percentage"
+
+TTTR_Summary
+```
+
+```{r}
+TTTR_Summary$Month <- ym(TTTR_Summary$Month)
+TTTR_Summary
+```
+
+
+```{r}
+ggplot(TTTR_Summary) + geom_line(aes(x=Month, y=TTTR_Percentage)) +
+  geom_line(aes(x=Month, y=TTTR_Percentage)) + labs(title="TTTR Percentage", x="Time", y="TTTR%" , color=cut)
+  # add axis lables and plot title.
+```
+```{r}
+TTTR_Summary <- TTTR_Summary %>% select_if(function(x) !all(is.na(x)))  #### Removing *all* empty columns:
+```
+
+```{r}
+TTTR_Summary <- TTTR_Summary %>% drop_na(Month)
+plot(TTTR_Summary)
+```
+
+
+```{r, message=FALSE, include=FALSE, echo=FALSE}
+TTTR_Summary$Month <- as.POSIXct(TTTR_Summary$Month)
+TTTR_Summary
+# TTTR_Summary_tsbl <- TTTR_Summary %>% as_tsibble(key = TTTR_Percentage, index = Month)
+# TTTR_Summary_tsbl$dupe <- NULL  
+# plot(TTTR_Summary_tsbl)
+#### Coerce data frame to a tsibble object
+```
+
+```{r}
+#TTTR_Summary_tsbl <- TTTR_Summary_tsbl %>% arrange(match(months, month.name))
+
+ggplot(TTTR_Summary) + geom_line(aes(x=Month, y=TTTR_Percentage)) +
+  geom_line(aes(x=Month, y=TTTR_Percentage)) + labs(title="TTTR Percentage", x="Time", y="TTTR%" , color=cut)
+  # add axis lables and plot title.
+```
+
+
+
+```{r}
+ts_TTTR_Summary <- ts(TTTR_Summary[,2], start = c(2016,1), end = c(2021,12), frequency = 12)
+#ts_TTTR_Summary_tsbl$Month <- arrange(ts_TTTR_Summary_tsbl$Month) 
+
+#Decompose the Data Into Four Components
+print(ts_TTTR_Summary)
+autoplot(ts_TTTR_Summary)
+```
+
+
+```{r}
+decomp_ts_TTTR_Summary <- decompose(ts_TTTR_Summary,"multiplicative")
+plot(decomp_ts_TTTR_Summary)
+```
+
+
+
+
+
+```{r}
+# Take the difference and remove the trend to make the model stationary - it is trend stationary (flat) now:
+Diff_ts_TTTR_Summary <- diff(ts_TTTR_Summary)
+autoplot(Diff_ts_TTTR_Summary)
+
+ggseasonplot(Diff_ts_TTTR_Summary)
+
+# Use a benchmark method to forecast:
+# Use seasonal Naive method as our benchmark: y_t = Y- {t-s} + e-t
+
+fit_Diff_ts_TTTR_Summary<- snaive(Diff_ts_TTTR_Summary)
+print(summary(fit_Diff_ts_TTTR_Summary))  # better to have residuals close to 0. | Residual sd: 908.3065 
+checkresiduals(fit_Diff_ts_TTTR_Summary)  # the residuals should be within the blue lines (95 confidence interval)
+```
+
+```{r}
+fit_ARIMA_ts_TTTR_Summary <- auto.arima(ts_TTTR_Summary, d=1, D=1, stepwise = FALSE, approximation = FALSE, trace = TRUE)
+print(summary(fit_ARIMA_ts_TTTR_Summary))   #sigma^2 estimated as 309563 so sigma is the square root of 7.323 which is: 556.3839 which is higher than ets and less than sNaive
+# Trace shows you the process while running the codes.
+sqrt(309563)
+checkresiduals(fit_ARIMA_ts_TTTR_Summary)
+```
+
+```{r}
+fit_ARIMA_TTTR_Summary <- auto.arima(Diff_ts_TTTR_Summary, D=1, stepwise = FALSE, approximation = FALSE, trace = TRUE)
+print(summary(fit_ARIMA_TTTR_Summary))   #sigma^2 estimated as 309563 so sigma is the square root of 7.323 which is: 556.3839 which is higher than ets and less than sNaive
+# Trace shows you the process while running the codes.
+```
+
+
+```{r}
+# we are using ARIMA forecasting:
+fcast_fit_ARIMA_ts_TTTR_Summary <- forecast(fit_ARIMA_ts_TTTR_Summary, h=48) # h= 36 means the next 36 months- from 2021 to 2024
+autoplot(fcast_fit_ARIMA_ts_TTTR_Summary)
+autoplot(fcast_fit_ARIMA_ts_TTTR_Summary, include = 67)
+```
+```{r}
+forecast_2022_2024 = as.data.frame(fcast_fit_ARIMA_ts_TTTR_Summary) 
+forecast_2022_2024
+```
+```{r}
+# summarize confidence intervals
+# intervals = [0.2, 0.1, 0.05, 0.01]
+# for a in intervals:
+# 	ci = fcast_fit_ARIMA_ts_TTTR_Summary(alpha=a)
+# 	print('%.1f%% Confidence Interval: %.3f between %.3f and %.3f' % ((1-a)*100, forecast, ci[0,0], ci[0,1]))
+```
+
+
+#####################################
+2016 to 2020
+#####################################
+
+```{r}
+ts_TTTR_Summary2020 <- ts(TTTR_Summary[,2], start = c(2016,1), end = c(2020,3), frequency = 12)
+#ts_TTTR_Summary_tsbl$Month <- arrange(ts_TTTR_Summary_tsbl$Month) 
+
+#Decompose the Data Into Four Components
+print(ts_TTTR_Summary2020)
+autoplot(ts_TTTR_Summary2020)
+```
+
+
+```{r}
+decomp_ts_TTTR_Summary2020 <- decompose(ts_TTTR_Summary2020,"multiplicative")
+plot(decomp_ts_TTTR_Summary2020)
+```
+
+
+
+
+
+```{r}
+# Take the difference and remove the trend to make the model stationary - it is trend stationary (flat) now:
+Diff_ts_TTTR_Summary2020 <- diff(ts_TTTR_Summary2020)
+autoplot(Diff_ts_TTTR_Summary2020)
+
+ggseasonplot(Diff_ts_TTTR_Summary2020)
+
+# Use a benchmark method to forecast:
+# Use seasonal Naive method as our benchmark: y_t = Y- {t-s} + e-t
+
+fit_Diff_ts_TTTR_Summary2020<- snaive(Diff_ts_TTTR_Summary2020)
+print(summary(fit_Diff_ts_TTTR_Summary2020))  # better to have residuals close to 0. | Residual sd: 908.3065 
+checkresiduals(fit_Diff_ts_TTTR_Summary2020)  # the residuals should be within the blue lines (95 confidence interval)
+```
+
+```{r}
+fit_ARIMA_ts_TTTR_Summary2020 <- auto.arima(ts_TTTR_Summary2020, d=1, D=1, stepwise = FALSE, approximation = FALSE, trace = TRUE)
+print(summary(fit_ARIMA_ts_TTTR_Summary2020))   #sigma^2 estimated as 309563 so sigma is the square root of 7.323 which is: 556.3839 which is higher than ets and less than sNaive
+# Trace shows you the process while running the codes.
+sqrt(309563)
+checkresiduals(fit_ARIMA_ts_TTTR_Summary2020)
+```
+
+```{r}
+fit_ARIMA_TTTR_Summary2020 <- auto.arima(Diff_ts_TTTR_Summary2020, D=1, stepwise = FALSE, approximation = FALSE, trace = TRUE)
+print(summary(fit_ARIMA_TTTR_Summary2020))   #sigma^2 estimated as 309563 so sigma is the square root of 7.323 which is: 556.3839 which is higher than ets and less than sNaive
+# Trace shows you the process while running the codes.
+```
+
+
+```{r}
+# we are using ARIMA forecasting:
+fcast_fit_ARIMA_ts_TTTR_Summary2020 <- forecast(fit_ARIMA_ts_TTTR_Summary2020, h=70) # h= 36 means the next 36 months- from 2021 to 2024
+autoplot(fcast_fit_ARIMA_ts_TTTR_Summary2020)
+autoplot(fcast_fit_ARIMA_ts_TTTR_Summary2020, include = 30)
+```
+```{r}
+fcast_fit_ARIMA_ts_TTTR_Summary2020
+```
+
+
